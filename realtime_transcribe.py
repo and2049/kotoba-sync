@@ -8,6 +8,7 @@ import time
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import os
 
+
 # --- Configuration ---
 # Audio settings
 CHUNK = 1024
