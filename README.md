@@ -1,2 +1,2 @@
 # kotoba-sync
-Real-time AI video transcription and translation
+Real-time AI audio transcription and translation
