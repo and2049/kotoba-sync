@@ -1,0 +1,48 @@
+# --- AI Models ---
+# Ignore all model files, which are large and should not be in version control.
+# Users should download or point to their own local copies.
+models/*
+
+# --- Python ---
+# Ignore virtual environment folders
+.venv/
+venv/
+ENV/
+env/
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignore distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# --- IDEs and Editors ---
+# Ignore configuration files from common editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# --- Operating System ---
+# Ignore OS-specific files
+.DS_Store
+Thumbs.db
