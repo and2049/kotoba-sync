@@ -1,2 +1,2 @@
 # kotoba-sync
-Real-Time AI Video Translator with Speech Enactment
+Real-time AI audio transcription and translation
