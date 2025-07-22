@@ -1,4 +1,3 @@
-import cv2
 import pyaudio
 import numpy as np
 import torch
@@ -8,7 +7,6 @@ import queue
 import time
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import os
-from PIL import Image, ImageDraw, ImageFont
 
 # --- Configuration ---
 # Audio settings
@@ -18,8 +16,8 @@ CHANNELS = 1
 RATE = 16000
 
 # Silence detection settings
-SILENCE_THRESHOLD = 500
-SILENT_CHUNKS = 2 * (RATE // CHUNK)
+SILENCE_THRESHOLD = 500  # Audio level threshold to be considered silence
+SILENT_CHUNKS = 2 * (RATE // CHUNK)  # Number of silent chunks before processing (2 seconds)
 
 # Whisper model configuration
 MODEL_SIZE = "base.en"
@@ -29,9 +27,6 @@ MODEL_SIZE = "base.en"
 TRANSLATION_MODEL_NAME = "google/gemma-2-2b-jpn-it"
 # Define the local path to check for the model first
 LOCAL_MODEL_PATH = os.path.join("models", "gemma-2-2b-jpn-it")
-
-# --- Font Configuration for UI ---
-JAPANESE_FONT_PATH = "fonts/Noto_Sans_JP/static/NotoSansJP-Regular.ttf"
 
 # --- Determine the model source ---
 # Prioritize loading from the local path if it exists.
@@ -54,10 +49,13 @@ is_running = True
 
 
 def capture_audio():
+    """
+    Captures audio from the microphone and puts it into a queue.
+    """
     p = pyaudio.PyAudio()
     try:
         stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True, frames_per_buffer=CHUNK)
-        print("🎤 Audio capture started. Speak English.")
+        print("🎤 Audio capture started. Speak English (Press Ctrl+C to stop).")
         while is_running:
             try:
                 data = stream.read(CHUNK, exception_on_overflow=False)
@@ -74,6 +72,9 @@ def capture_audio():
 
 
 def transcribe_audio():
+    """
+    Transcribes audio from the queue using the Whisper model.
+    """
     global transcribed_text
 
     print("🤖 Loading Whisper model...")
@@ -90,13 +91,15 @@ def transcribe_audio():
             audio_buffer.extend(audio_chunk)
             audio_np = np.frombuffer(audio_chunk, dtype=np.int16)
 
+            # Check for silence
             if np.abs(audio_np).mean() < SILENCE_THRESHOLD:
                 silent_chunks_count += 1
             else:
                 silent_chunks_count = 0
 
+            # Process audio on silence or if the buffer is too long
             if silent_chunks_count > SILENT_CHUNKS or len(audio_buffer) > RATE * 15:
-                if len(audio_buffer) > RATE:
+                if len(audio_buffer) > RATE:  # Process only if there's enough audio
                     print("🤖 Detected pause, transcribing audio...")
                     audio_data = np.frombuffer(audio_buffer, dtype=np.int16).astype(np.float32) / 32768.0
 
@@ -104,11 +107,11 @@ def transcribe_audio():
                     new_text = result.get('text', '').strip()
 
                     if new_text:
-                        print(f"   -> Transcribed: {new_text}")
                         with text_lock:
                             transcribed_text = new_text
                         text_to_translate_queue.put(new_text)
 
+                # Reset buffer and silence counter
                 audio_buffer = bytearray()
                 silent_chunks_count = 0
         except queue.Empty:
@@ -119,6 +122,9 @@ def transcribe_audio():
 
 
 def translate_text_gemma():
+    """
+    Translates text from the queue using the Gemma model.
+    """
     global translated_text
 
     print(f"🌐 Loading Gemma translation model from '{model_source}'...")
@@ -132,7 +138,7 @@ def translate_text_gemma():
             torch_dtype=torch_dtype,
             device_map="auto"
         )
-        print(f"🌐 Gemma model loaded successfully.")
+        print("🌐 Gemma model loaded successfully.")
     except Exception as e:
         print(f"❌ Failed to load Gemma model: {e}")
         print(
@@ -158,7 +164,6 @@ def translate_text_gemma():
             response = tokenizer.decode(outputs[0, inputs.input_ids.shape[-1]:], skip_special_tokens=True)
             new_translated_text = response.strip()
 
-            print(f"   -> Translated (ja): {new_translated_text}")
             with text_lock:
                 translated_text = new_translated_text
 
@@ -170,14 +175,10 @@ def translate_text_gemma():
 
 
 def main():
+    """
+    Main function to start threads and display results in the console.
+    """
     global is_running
-
-    try:
-        jp_font = ImageFont.truetype(JAPANESE_FONT_PATH, 32)
-        print(f"✅ Successfully loaded Japanese font: {JAPANESE_FONT_PATH}")
-    except IOError:
-        print(f"❌ Error: The font file '{JAPANESE_FONT_PATH}' was not found.")
-        jp_font = ImageFont.load_default()
 
     audio_thread = threading.Thread(target=capture_audio, daemon=True)
     transcribe_thread = threading.Thread(target=transcribe_audio, daemon=True)
@@ -187,43 +188,32 @@ def main():
     transcribe_thread.start()
     translate_thread.start()
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
-        print("❌ Cannot open camera.")
-        return
+    last_displayed_transcribed = ""
+    last_displayed_translated = ""
 
-    print("🎥 Video capture started. Press 'q' to quit.")
+    try:
+        while is_running:
+            with text_lock:
+                current_transcribed = transcribed_text
+                current_translated = translated_text
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+            # Print new transcriptions and translations only if they have changed
+            if current_transcribed and current_transcribed != last_displayed_transcribed:
+                print("\n" + "="*50)
+                print(f"🔴 TRANSCRIBED (EN): {current_transcribed}")
+                last_displayed_transcribed = current_transcribed
 
-        with text_lock:
-            display_text_orig = f"EN: {transcribed_text}"
-            display_text_trans = f"JA: {translated_text}"
+            if current_translated and current_translated != last_displayed_translated:
+                print(f"🟢 TRANSLATED  (JA): {current_translated}")
+                print("="*50 + "\n")
+                last_displayed_translated = current_translated
 
-        overlay = frame.copy()
-        cv2.rectangle(overlay, (0, 0), (frame.shape[1], 100), (0, 0, 0), -1)
-        frame = cv2.addWeighted(overlay, 0.6, frame, 0.4, 0)
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\n🛑 Shutting down...")
+        is_running = False
 
-        cv2.putText(frame, display_text_orig, (20, 40), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.8, (255, 255, 255), 2, cv2.LINE_AA)
-
-        frame_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-        draw = ImageDraw.Draw(frame_pil)
-        draw.text((20, 70), display_text_trans, font=jp_font, fill=(100, 255, 100, 255))
-        frame = cv2.cvtColor(np.array(frame_pil), cv2.COLOR_RGB2BGR)
-
-        cv2.imshow('Real-Time Speech Translation', frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            print("🛑 Shutting down...")
-            is_running = False
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
+    # Wait for threads to finish
     audio_thread.join(timeout=2)
     transcribe_thread.join(timeout=2)
     translate_thread.join(timeout=2)
